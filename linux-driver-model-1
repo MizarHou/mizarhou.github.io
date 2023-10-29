@@ -38,11 +38,11 @@
 </style>
     
     <title>kobject、kset和ktype | Mizar</title>
-    <link rel="canonical" href="https://mizarhou.github.io/mizarhou.github.io/linux-driver-model-1">
+    <link rel="canonical" href="https://www.mizar.world/mizarhou.github.io/linux-driver-model-1">
     <meta name="description" content="1.Overview​	kobject、ktype、kset作为统一设备模型的基础,目的是为了抽象出基类操作。内核中driver、device、bus结构都继承这个struct。例如，每个内核对象都需要有引用计数，都需要维护sysfs下的文件层级关系，那没必要每个对象都各自实现这个方法，每个设备都包含一个kobject就可以了。 ​	kset则是一系列的kobject的组合，很多内核对象有各种各样">
 <meta property="og:type" content="article">
 <meta property="og:title" content="kobject、kset和ktype">
-<meta property="og:url" content="https://mizarhou.github.io/linux-driver-model-1">
+<meta property="og:url" content="https://www.mizar.world/linux-driver-model-1">
 <meta property="og:site_name" content="Mizar">
 <meta property="og:description" content="1.Overview​	kobject、ktype、kset作为统一设备模型的基础,目的是为了抽象出基类操作。内核中driver、device、bus结构都继承这个struct。例如，每个内核对象都需要有引用计数，都需要维护sysfs下的文件层级关系，那没必要每个对象都各自实现这个方法，每个设备都包含一个kobject就可以了。 ​	kset则是一系列的kobject的组合，很多内核对象有各种各样">
 <meta property="og:locale" content="zh_CN">
@@ -746,7 +746,7 @@ finish<span class="token operator">:</span>
         <blockquote class="mdui-m-x-0 mdui-m-t-4">
     <strong>
         作者：<a href="/mizarhou.github.io/about/">Mizar.Hou</a><br>
-        链接：<a href="https://mizarhou.github.io/linux-driver-model-1">https://mizarhou.github.io/linux-driver-model-1</a><br>
+        链接：<a href="https://www.mizar.world/linux-driver-model-1">https://www.mizar.world/linux-driver-model-1</a><br>
         
             本文采用 <a rel="license noopener" target="_blank" href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a> 进行许可。
         
