@@ -94,7 +94,7 @@
                 <i class="mdui-collapse-item-arrow mdui-icon material-icons">keyboard_arrow_down</i>
             </div>
             <div class="mdui-collapse-item-body mdui-list mdui-list-dense">
-                
+                <a class="mdui-list-item mdui-ripple m-link" href="/mizarhou.github.io/categories/%E7%BB%9F%E4%B8%80%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E6%A8%A1%E5%9E%8B/">统一设备驱动模型</a>
             </div>
         </div>
         
@@ -121,14 +121,17 @@
     
     <div class="mdui-card-primary mdui-ripple">
     <div class="mdui-card-primary-title">
-        <a role="heading" aria-level="1" class="mdui-text-color-theme-text" href="/mizarhou.github.io/2023/10/29/hello-world/">Hello World</a>
+        <a role="heading" aria-level="1" class="mdui-text-color-theme-text" href="/mizarhou.github.io/linux-driver-model-1">kobject、kset和ktype</a>
+        
+        <small> <a class="mdui-text-color-theme-text category-link" href="/mizarhou.github.io/categories/%E7%BB%9F%E4%B8%80%E8%AE%BE%E5%A4%87%E9%A9%B1%E5%8A%A8%E6%A8%A1%E5%9E%8B/">统一设备驱动模型</a></small>
         
     </div>
     <div class="mdui-card-primary-subtitle mdui-typo">
         
-        <span mdui-tooltip="{content:'创建时间：2023-10-29 10:48<br>最后更新时间：2023-10-29 10:48'}">2023-10-29 -</span>
+        <span><a class="tag-none-link" href="/mizarhou.github.io/tags/kobject/" rel="tag">kobject</a> <a class="tag-none-link" href="/mizarhou.github.io/tags/linux/" rel="tag">linux</a> <a class="tag-none-link" href="/mizarhou.github.io/tags/%E9%A9%B1%E5%8A%A8%E6%A8%A1%E5%9E%8B/" rel="tag">驱动模型</a> -</span>
+        <span mdui-tooltip="{content:'创建时间：2023-10-29 01:10<br>最后更新时间：2023-10-29 01:32'}">2023-10-29 -</span>
         
-            <span>2023/10/29/hello-world/</span>
+            <span>linux-driver-model-1</span>
         
     </div>
 </div>
@@ -137,25 +140,602 @@
     <div class="mdui-divider"></div>
     <div class="mdui-card-content mdui-typo">
         
-        <p>Welcome to <a target="_blank" rel="noopener" href="https://hexo.io/">Hexo</a>! This is your very first post. Check <a target="_blank" rel="noopener" href="https://hexo.io/docs/">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a target="_blank" rel="noopener" href="https://hexo.io/docs/troubleshooting.html">troubleshooting</a> or you can ask me on <a target="_blank" rel="noopener" href="https://github.com/hexojs/hexo/issues">GitHub</a>.</p>
-<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><pre class="line-numbers language-bash" data-language="bash"><code class="language-bash">$ hexo new <span class="token string">"My New Post"</span><span aria-hidden="true" class="line-numbers-rows"><span></span></span></code></pre>
+        <h1 id="1-Overview"><a href="#1-Overview" class="headerlink" title="1.Overview"></a>1.Overview</h1><p>​	<code>kobject</code>、<code>ktype</code>、<code>kset</code>作为统一设备模型的基础,目的是为了抽象出<strong>基类操作</strong>。内核中<code>driver</code>、<code>device</code>、<code>bus</code>结构都继承这个<code>struct</code>。例如，每个内核对象都需要有引用计数，都需要维护<code>sysfs</code>下的文件层级关系，那没必要每个对象都各自实现这个方法，每个设备都包含一个<code>kobject</code>就可以了。</p>
+<p>​	<code>kset</code>则是一系列的<code>kobject</code>的组合，很多内核对象有各种各样的相关性，共同特点。那我们都可以把他们归属为同一个<code>kset</code>组合。例如在<code>devices_init</code>时，创建的<code>device_kset</code>，后续所有注册到内核的设备都属于这个<code>kset</code>。<code>buses_init</code>时创建的<code>bus_kset</code>。所有的<code>bus</code>都属于<code>bus_kset</code>。<code>kset</code>内部也嵌入了<code>struct list_head</code>，用以将<code>kset</code>下所有的<code>kobj</code>连起来。</p>
+<p>​	<code>ktype(struct kobj_type)</code>则是描述了<code>kobject</code>的属性操作方法，例如在<code>kobject</code>释放时候的<code>release</code>函数，<code>kobject</code>在<code>sysfs</code>下的属性接口。</p>
+<p>​	这里也是内核最能体现面向对象的地方。内核采用<code>C</code>语言编写，本不能像<code>C++、Java</code>一样实现继承。但内核开发者很巧妙的运用了指针和结构实现了这一特性。</p>
+<h1 id="2-kobj数据结构和三者之间的关系"><a href="#2-kobj数据结构和三者之间的关系" class="headerlink" title="2.kobj数据结构和三者之间的关系"></a>2.kobj数据结构和三者之间的关系</h1><h3 id="2-1-kobject、kset、ktype数据结构"><a href="#2-1-kobject、kset、ktype数据结构" class="headerlink" title="2.1 kobject、kset、ktype数据结构"></a>2.1 kobject、kset、ktype数据结构</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token punctuation">&#123;</span>
+    <span class="token comment">/* kobject 名称 */</span>
+    <span class="token keyword">const</span> <span class="token keyword">char</span>      <span class="token operator">*</span>name<span class="token punctuation">;</span>
+    <span class="token comment">/* 链表节点，如果当前kobj从属于某个kset，就会把此节点加入到kset的链表中*/</span>
+    <span class="token keyword">struct</span> <span class="token class-name">list_head</span>    entry<span class="token punctuation">;</span>
+    <span class="token comment">/* 指向kobj 的父结构 */</span>
+    <span class="token keyword">struct</span> <span class="token class-name">kobject</span>      <span class="token operator">*</span>parent<span class="token punctuation">;</span>
+    <span class="token comment">/* 指向当前kobj从属的kset集合 */</span>
+    <span class="token keyword">struct</span> <span class="token class-name">kset</span>     <span class="token operator">*</span>kset<span class="token punctuation">;</span>
+    <span class="token comment">/* 指示kobject的属性操作方法 */</span>
+    <span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_type</span>  <span class="token operator">*</span>ktype<span class="token punctuation">;</span>
+    <span class="token comment">/* 通过此字段 将kobj和sysfs联合起来 */</span>
+    <span class="token keyword">struct</span> <span class="token class-name">kernfs_node</span>  <span class="token operator">*</span>sd<span class="token punctuation">;</span> <span class="token comment">/* sysfs directory entry */</span>
+    <span class="token comment">/* kobj的引用计数, 如果引用计数位0，则调用注册的release程序，类似于CPP的析构函数 */</span>
+    <span class="token keyword">struct</span> <span class="token class-name">kref</span>     kref<span class="token punctuation">;</span>
+ 
+    <span class="token comment">/* kobj的状态标志位 */</span>
+    <span class="token keyword">unsigned</span> <span class="token keyword">int</span> state_initialized<span class="token operator">:</span><span class="token number">1</span><span class="token punctuation">;</span>           <span class="token comment">//初始化状态标志位</span>
+    <span class="token keyword">unsigned</span> <span class="token keyword">int</span> state_in_sysfs<span class="token operator">:</span><span class="token number">1</span><span class="token punctuation">;</span>              <span class="token comment">//是否加入到sysfs</span>
+    <span class="token keyword">unsigned</span> <span class="token keyword">int</span> state_add_uevent_sent<span class="token operator">:</span><span class="token number">1</span><span class="token punctuation">;</span>    <span class="token comment">//添加kobject的uevent是否发送标志位</span>
+    <span class="token keyword">unsigned</span> <span class="token keyword">int</span> state_remove_uevent_sent<span class="token operator">:</span><span class="token number">1</span><span class="token punctuation">;</span>  <span class="token comment">//删除kobject的uevent是否发送标志位</span>
+    <span class="token keyword">unsigned</span> <span class="token keyword">int</span> uevent_suppress<span class="token operator">:</span><span class="token number">1</span><span class="token punctuation">;</span>        <span class="token comment">//是否忽略上报uevent</span>
+ 
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">ifdef</span> <span class="token expression">CONFIG_DEBUG_KOBJECT_RELEASE</span></span>
+    <span class="token keyword">struct</span> <span class="token class-name">delayed_work</span> release<span class="token punctuation">;</span>
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">endif</span></span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
 
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/writing.html">Writing</a></p>
-<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><pre class="line-numbers language-bash" data-language="bash"><code class="language-bash">$ hexo server<span aria-hidden="true" class="line-numbers-rows"><span></span></span></code></pre>
+<pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">list_head</span> list<span class="token punctuation">;</span>						<span class="token comment">//链表节点，将kset集合下的所有kobj串起来</span>
+	<span class="token class-name">spinlock_t</span> list_lock<span class="token punctuation">;</span>						<span class="token comment">//自旋锁</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> kobj<span class="token punctuation">;</span>						<span class="token comment">//kset自己的内核对象描述，作为kset集合中所有kobj的父obj</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kset_uevent_ops</span> <span class="token operator">*</span>uevent_ops<span class="token punctuation">;</span>	  <span class="token comment">//kset uevent的属性操作方法</span>
+<span class="token punctuation">&#125;</span> __randomize_layout<span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
 
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/server.html">Server</a></p>
-<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><pre class="line-numbers language-bash" data-language="bash"><code class="language-bash">$ hexo generate<span aria-hidden="true" class="line-numbers-rows"><span></span></span></code></pre>
+<pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">struct</span> <span class="token class-name">kobj_type</span> <span class="token punctuation">&#123;</span>
+	<span class="token keyword">void</span> <span class="token punctuation">(</span><span class="token operator">*</span>release<span class="token punctuation">)</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>								<span class="token comment">//类似于C++的析构函数，在释放kobj的时候自动调用</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">sysfs_ops</span> <span class="token operator">*</span>sysfs_ops<span class="token punctuation">;</span>									<span class="token comment">//kobj在/sysfs下的属性操作方法</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">attribute_group</span> <span class="token operator">*</span><span class="token operator">*</span>default_groups<span class="token punctuation">;</span>						 <span class="token comment">//声明一组属性</span>
+    <span class="token comment">//下面的暂时不分析</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_ns_type_operations</span> <span class="token operator">*</span><span class="token punctuation">(</span><span class="token operator">*</span>child_ns_type<span class="token punctuation">)</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">const</span> <span class="token keyword">void</span> <span class="token operator">*</span><span class="token punctuation">(</span><span class="token operator">*</span>namespace<span class="token punctuation">)</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">void</span> <span class="token punctuation">(</span><span class="token operator">*</span>get_ownership<span class="token punctuation">)</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">,</span> <span class="token class-name">kuid_t</span> <span class="token operator">*</span>uid<span class="token punctuation">,</span> <span class="token class-name">kgid_t</span> <span class="token operator">*</span>gid<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
 
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/generating.html">Generating</a></p>
-<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><pre class="line-numbers language-bash" data-language="bash"><code class="language-bash">$ hexo deploy<span aria-hidden="true" class="line-numbers-rows"><span></span></span></code></pre>
+<h3 id="2-1-kobject、kset、ktype关系图"><a href="#2-1-kobject、kset、ktype关系图" class="headerlink" title="2.1 kobject、kset、ktype关系图"></a>2.1 kobject、kset、ktype关系图</h3><figure class="mdui-img-fluid"><img src="https://mizar-picgo.oss-cn-beijing.aliyuncs.com/picture/image-20231029003945219.png" alt="image-20231029003945219"class="mdui-img-rounded" loading="lazy"></figure>
+<h1 id="3-demo-test"><a href="#3-demo-test" class="headerlink" title="3.demo test"></a>3.demo test</h1><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">include</span> <span class="token string">&lt;linux/init.h></span></span>
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">include</span> <span class="token string">&lt;linux/module.h></span></span>
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">include</span> <span class="token string">&lt;linux/sysfs.h></span></span>
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">include</span> <span class="token string">&lt;linux/kobject.h></span></span>
 
-<p>More info: <a target="_blank" rel="noopener" href="https://hexo.io/docs/one-command-deployment.html">Deployment</a></p>
+<span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span><span class="token punctuation">&#123;</span>
+	<span class="token keyword">char</span> <span class="token operator">*</span>name<span class="token punctuation">;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> kobj<span class="token punctuation">;</span>		<span class="token comment">//kobj一般是嵌入到某个数据结构的，例如struct device、struct bus_type</span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span>
+
+<span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>mizar_kset<span class="token punctuation">;</span>
+<span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span> <span class="token operator">*</span>akobj<span class="token punctuation">;</span>
+<span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span> <span class="token operator">*</span>bkobj<span class="token punctuation">;</span>
+
+<span class="token comment">/*属性及其方法的实现*/</span>
+<span class="token keyword">static</span> <span class="token class-name">ssize_t</span> <span class="token function">name_attr_show</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span> kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> <span class="token operator">*</span>attr<span class="token punctuation">,</span> <span class="token keyword">char</span> <span class="token operator">*</span>buf<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token class-name">ssize_t</span> <span class="token function">name_attr_store</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span> kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> <span class="token operator">*</span>attr<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>buf<span class="token punctuation">,</span> <span class="token class-name">size_t</span> len<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">return</span> len<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token class-name">ssize_t</span> <span class="token function">misc_attr_show</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span> kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> <span class="token operator">*</span>attr<span class="token punctuation">,</span> <span class="token keyword">char</span> <span class="token operator">*</span>buf<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token class-name">ssize_t</span> <span class="token function">misc_attr_store</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span> kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> <span class="token operator">*</span>attr<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>buf<span class="token punctuation">,</span> <span class="token class-name">size_t</span> len<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">return</span> len<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> name <span class="token operator">=</span> <span class="token function">__ATTR</span><span class="token punctuation">(</span>name<span class="token punctuation">,</span><span class="token number">0660</span><span class="token punctuation">,</span>name_attr_show<span class="token punctuation">,</span>name_attr_store<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> misc <span class="token operator">=</span>  <span class="token function">__ATTR</span><span class="token punctuation">(</span>misc<span class="token punctuation">,</span><span class="token number">0660</span><span class="token punctuation">,</span>misc_attr_show<span class="token punctuation">,</span>misc_attr_store<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">attribute</span> <span class="token operator">*</span>kobj_attrs<span class="token punctuation">[</span><span class="token punctuation">]</span> <span class="token operator">=</span> <span class="token punctuation">&#123;</span>
+	<span class="token operator">&amp;</span>name<span class="token punctuation">.</span>attr<span class="token punctuation">,</span>
+	<span class="token operator">&amp;</span>misc<span class="token punctuation">.</span>attr<span class="token punctuation">,</span>
+	<span class="token constant">NULL</span><span class="token punctuation">,</span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span>
+
+<span class="token keyword">struct</span> <span class="token class-name">attribute_group</span> __mizar_kobj_attr_grp <span class="token operator">=</span> <span class="token punctuation">&#123;</span>
+	<span class="token punctuation">.</span>name  <span class="token operator">=</span> <span class="token string">"mizar_kobj_attr"</span><span class="token punctuation">,</span>
+	<span class="token punctuation">.</span>attrs <span class="token operator">=</span> kobj_attrs<span class="token punctuation">,</span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span>
+
+<span class="token comment">/*container_of， 内核的又一智慧体现*/</span>
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">define</span> <span class="token macro-name function">to_mizar_kobj</span><span class="token expression"><span class="token punctuation">(</span>x<span class="token punctuation">)</span> <span class="token function">container_of</span><span class="token punctuation">(</span>x<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span><span class="token punctuation">,</span> kobj<span class="token punctuation">)</span></span></span>
+
+<span class="token comment">/*release函数*/</span>
+<span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">mizar_kobj_release</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span> <span class="token operator">*</span>mkobj <span class="token operator">=</span> <span class="token function">to_mizar_kobj</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> kobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>mkobj<span class="token operator">-></span>name<span class="token punctuation">)</span>
+		<span class="token function">kfree</span><span class="token punctuation">(</span>mkobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>mkobj<span class="token punctuation">)</span>
+		<span class="token function">kfree</span><span class="token punctuation">(</span>mkobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token macro property"><span class="token directive-hash">#</span><span class="token directive keyword">define</span> <span class="token macro-name function">to_kobj_attr</span><span class="token expression"><span class="token punctuation">(</span>x<span class="token punctuation">)</span> <span class="token function">container_of</span><span class="token punctuation">(</span>x<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span><span class="token punctuation">,</span> attr<span class="token punctuation">)</span></span></span>
+<span class="token keyword">static</span> <span class="token class-name">ssize_t</span> <span class="token function">kobj_sysfs_show</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span> kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">attribute</span> <span class="token operator">*</span>attr<span class="token punctuation">,</span> <span class="token keyword">char</span> <span class="token operator">*</span>buf<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> <span class="token operator">*</span>attribute<span class="token punctuation">;</span>
+
+	attribute <span class="token operator">=</span> <span class="token function">to_kobj_attr</span><span class="token punctuation">(</span>attr<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>attribute<span class="token operator">-></span>show<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s unregister\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> kobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token keyword">return</span> <span class="token operator">-</span>EIO<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	<span class="token comment">/*读写相关的属性文件，先执行sysfs的方法，从这里调用attr的读写方法*/</span>
+	<span class="token keyword">return</span> attribute<span class="token operator">-></span><span class="token function">show</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> attribute<span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token class-name">ssize_t</span> <span class="token function">kobj_sysfs_store</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span> kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">attribute</span> <span class="token operator">*</span>attr<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>buf<span class="token punctuation">,</span> <span class="token class-name">size_t</span> len<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobj_attribute</span> <span class="token operator">*</span>attribute<span class="token punctuation">;</span>
+	attribute <span class="token operator">=</span> <span class="token function">to_kobj_attr</span><span class="token punctuation">(</span>attr<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>attribute<span class="token operator">-></span>show<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s unregister\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> kobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token keyword">return</span> <span class="token operator">-</span>EIO<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> buf<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">return</span> attribute<span class="token operator">-></span><span class="token function">store</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> attribute<span class="token punctuation">,</span> buf<span class="token punctuation">,</span> len<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token comment">/*sysfs操作接口实现，类似于file_operation的read和write*/</span>
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">sysfs_ops</span> __mizar_kobj_sysfs_ops <span class="token operator">=</span> <span class="token punctuation">&#123;</span>
+	<span class="token punctuation">.</span>show <span class="token operator">=</span> kobj_sysfs_show<span class="token punctuation">,</span>
+	<span class="token punctuation">.</span>store <span class="token operator">=</span> kobj_sysfs_store<span class="token punctuation">,</span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span>
+
+<span class="token comment">/*包含一个release函数，和一个 sysfs接口*/</span>
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_type</span> __ktype <span class="token operator">=</span> <span class="token punctuation">&#123;</span>
+	<span class="token punctuation">.</span>release <span class="token operator">=</span> mizar_kobj_release<span class="token punctuation">,</span>
+	<span class="token punctuation">.</span>sysfs_ops <span class="token operator">=</span> <span class="token operator">&amp;</span>__mizar_kobj_sysfs_ops<span class="token punctuation">,</span>
+<span class="token punctuation">&#125;</span><span class="token punctuation">;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span> <span class="token operator">*</span><span class="token function">create_kobject</span><span class="token punctuation">(</span><span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>name<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">int</span> ret<span class="token punctuation">;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span> <span class="token operator">*</span>mkobj<span class="token punctuation">;</span>
+
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token comment">//为mizar_kobj申请内存</span>
+	mkobj <span class="token operator">=</span> <span class="token function">kzalloc</span><span class="token punctuation">(</span><span class="token keyword">sizeof</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span><span class="token punctuation">)</span><span class="token punctuation">,</span> GFP_KERNEL<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>mkobj<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+	<span class="token comment">//为name申请内存</span>
+	mkobj<span class="token operator">-></span>name <span class="token operator">=</span> <span class="token function">kzalloc</span><span class="token punctuation">(</span><span class="token function">strlen</span><span class="token punctuation">(</span>name<span class="token punctuation">)</span> <span class="token operator">+</span> <span class="token number">1</span><span class="token punctuation">,</span> GFP_KERNEL<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>mkobj<span class="token operator">-></span>name<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token keyword">goto</span> error_kobj<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+	<span class="token function">memcpy</span><span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token keyword">void</span> <span class="token operator">*</span><span class="token punctuation">)</span>mkobj<span class="token operator">-></span>name<span class="token punctuation">,</span> <span class="token punctuation">(</span><span class="token keyword">void</span> <span class="token operator">*</span><span class="token punctuation">)</span>name<span class="token punctuation">,</span> <span class="token function">strlen</span><span class="token punctuation">(</span>name<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+	
+	<span class="token comment">//初始化kobject，并指定了其ktype操作方法</span>
+	<span class="token function">kobject_init</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">,</span> <span class="token operator">&amp;</span>__ktype<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	ret <span class="token operator">=</span> <span class="token function">kobject_add</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">,</span> parent<span class="token punctuation">,</span> <span class="token string">"%s"</span><span class="token punctuation">,</span> name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>ret<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">kobject_put</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token keyword">goto</span> error_kobj_add<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+	<span class="token comment">//创建/sys下的节点目录及属性文件</span>
+	ret <span class="token operator">=</span> <span class="token function">sysfs_create_group</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">,</span> <span class="token operator">&amp;</span>__mizar_kobj_attr_grp<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>ret<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">sysfs_remove_group</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">,</span> <span class="token operator">&amp;</span>__mizar_kobj_attr_grp<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token keyword">goto</span> error_sysfs_create<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token keyword">goto</span> finish<span class="token punctuation">;</span>
+
+error_sysfs_create<span class="token operator">:</span>
+	<span class="token function">kobject_put</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+error_kobj_add<span class="token operator">:</span>
+	<span class="token function">kfree</span><span class="token punctuation">(</span>mkobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+error_kobj<span class="token operator">:</span>
+	<span class="token function">kfree</span><span class="token punctuation">(</span>mkobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	mkobj <span class="token operator">=</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+finish<span class="token operator">:</span>
+	<span class="token keyword">return</span> mkobj<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">destory_kobject</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">mizar_kobj</span> <span class="token operator">*</span>mkobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">sysfs_remove_group</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">,</span> <span class="token operator">&amp;</span>__mizar_kobj_attr_grp<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">kobject_put</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>mkobj<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">kfree</span><span class="token punctuation">(</span>mkobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">kfree</span><span class="token punctuation">(</span>mkobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token comment">/**********************kset 的init和deinit 接口****************************************/</span>
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span><span class="token function">create_kset</span><span class="token punctuation">(</span><span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>name<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>kset<span class="token punctuation">;</span>
+
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]: create kset: %s\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">,</span> name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	kset <span class="token operator">=</span> <span class="token function">kset_create_and_add</span><span class="token punctuation">(</span>name<span class="token punctuation">,</span> <span class="token constant">NULL</span><span class="token punctuation">,</span> <span class="token constant">NULL</span><span class="token punctuation">)</span><span class="token punctuation">;</span>				<span class="token comment">//动态创建一个kset</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kset<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token keyword">return</span> kset<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">destory_kset</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>kset<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>kset<span class="token punctuation">)</span>
+		<span class="token function">kset_unregister</span><span class="token punctuation">(</span>kset<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+<span class="token comment">/************************************************************************************/</span>
+<span class="token keyword">static</span> <span class="token keyword">int</span> <span class="token function">kobj_init</span><span class="token punctuation">(</span><span class="token keyword">void</span><span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]:\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+	mizar_kset <span class="token operator">=</span> <span class="token function">create_kset</span><span class="token punctuation">(</span><span class="token string">"mizar_kset"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>mizar_kset<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token operator">-</span><span class="token number">1</span><span class="token punctuation">;</span>
+
+	akobj <span class="token operator">=</span> <span class="token function">create_kobject</span><span class="token punctuation">(</span><span class="token string">"akobj"</span><span class="token punctuation">,</span> <span class="token operator">&amp;</span>mizar_kset<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>akobj<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token operator">-</span><span class="token number">2</span><span class="token punctuation">;</span>
+
+	bkobj <span class="token operator">=</span> <span class="token function">create_kobject</span><span class="token punctuation">(</span><span class="token string">"bkobj"</span><span class="token punctuation">,</span> <span class="token operator">&amp;</span>mizar_kset<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>bkobj<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token operator">-</span><span class="token number">3</span><span class="token punctuation">;</span>
+
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">kobj_exit</span><span class="token punctuation">(</span><span class="token keyword">void</span><span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">pr_info</span><span class="token punctuation">(</span><span class="token string">"%s[%d]:\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> <span class="token constant">__LINE__</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">destory_kobject</span><span class="token punctuation">(</span>akobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">destory_kobject</span><span class="token punctuation">(</span>bkobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">destory_kset</span><span class="token punctuation">(</span>mizar_kset<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token function">module_init</span><span class="token punctuation">(</span>kobj_init<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token function">module_exit</span><span class="token punctuation">(</span>kobj_exit<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+<span class="token function">MODULE_LICENSE</span><span class="token punctuation">(</span><span class="token string">"GPL v2"</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token function">MODULE_AUTHOR</span><span class="token punctuation">(</span><span class="token string">"Mizar.Hou"</span><span class="token punctuation">)</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<ul>
+<li><p>demo实现了一个<code>kset</code>:<code>mizar_kset</code>，以及两个<code>kobject</code>：<code>akobj</code>和<code>bkobj</code>，这两个<code>kobj</code>都属于<code>mizar_kset</code>,在<code>/sys</code>路径下直接体现为：</p>
+<p>  <img src="https://mizar-picgo.oss-cn-beijing.aliyuncs.com/picture/image-20231028182048383.png" alt="image-20231028182048383"></p>
+</li>
+<li><p>两个<code>kobject</code>都有相同的<code>kobj_type</code>, 参考<code> struct kobj_type __ktype</code>, 实现了一个<code>release</code>接口，在<code>kobject-&gt;kref</code>引用计数减到0的时候，由系统自己调用；包含一对<code>sysfs</code>操作方法,参考<code>__mizar_kobj_sysfs_ops</code></p>
+</li>
+<li><p>两个<code>kobject</code>都包含相同的<code>attribute</code>, 在创建<code>kobject</code>时，通过<code>sysfs_create_group(&amp;mkobj-&gt;kobj, &amp;__mizar_kobj_attr_grp)</code>创建，直接体现为</p>
+<p>  <img src="https://mizar-picgo.oss-cn-beijing.aliyuncs.com/picture/image-20231028182753699.png" alt="image-20231028182753699"></p>
+</li>
+<li><p><code>__mizar_kobj_attr_grp</code>包含两个属性,参考<code>struct attribute_group __mizar_kobj_attr_grp</code>的实现，这两个<code>attr</code>的可以在<code>shell</code>中通过<code>cat &amp; echo</code>命令进行读写：</p>
+<p>  <img src="https://mizar-picgo.oss-cn-beijing.aliyuncs.com/picture/image-20231028183032510.png" alt="image-20231028183032510"></p>
+<ul>
+<li>通过执行<code>log</code>可以看出，应用层读写先调用到<code>sysfs</code>的读写操作方法，在调用属性实现的读写方法，从<code>syfs_ops-&gt;show</code>到<code>attr-&gt;show</code>的调用实现参考<code>kobj_sysfs_show</code>, <code>cat</code>指令如何调用的<code>sysfs</code>的这部分暂时不进行分析。</li>
+</ul>
+</li>
+<li><p>使用<code>rmmod</code>卸载<code>ko</code>, 可以看出在<code>sys</code>下创建的节点已经被删除，同时调用了<code>__ktype</code>中实现的<code>release</code>接口，释放<code>kobject</code>,但是<code>kset</code>中也包含一个<code>kobject</code>,什么事件<code>release</code>的呢？ 这是因为初始化<code>kset</code>采用的<code>kset_create_and_add</code>接口中，指定了一个默认的<code>__dynamic_kobj_ktype</code>,在<code>kset_unregister</code>的时候自行<code>release</code>.有兴趣的同学可以使用<code>ftrace</code>跟踪下函数的调用栈</p>
+<p>  <img src="https://mizar-picgo.oss-cn-beijing.aliyuncs.com/picture/image-20231028183359763.png" alt="image-20231028183359763"></p>
+</li>
+</ul>
+<h1 id="4-kobject-代码走读"><a href="#4-kobject-代码走读" class="headerlink" title="4.kobject 代码走读"></a>4.kobject 代码走读</h1><p><strong>文件位置</strong>: <code>$&#123;KERNEL_DIRKERNEL_DIR&#125;/lib/kobject.c</code></p>
+<h2 id="4-1-kobject-init"><a href="#4-1-kobject-init" class="headerlink" title="4.1 kobject_init"></a>4.1 kobject_init</h2><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">kobject_init_internal</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kobj<span class="token punctuation">)</span>
+		<span class="token keyword">return</span><span class="token punctuation">;</span>
+	<span class="token function">kref_init</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>kref<span class="token punctuation">)</span><span class="token punctuation">;</span>													<span class="token comment">//初始化的时候，kref设置为1</span>
+	<span class="token function">INIT_LIST_HEAD</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>entry<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	kobj<span class="token operator">-></span>state_in_sysfs <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+	kobj<span class="token operator">-></span>state_add_uevent_sent <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+	kobj<span class="token operator">-></span>state_remove_uevent_sent <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+	kobj<span class="token operator">-></span>state_initialized <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">void</span> <span class="token function">kobject_init</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_type</span> <span class="token operator">*</span>ktype<span class="token punctuation">)</span>			<span class="token comment">//初始化kobject的数据结构</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">char</span> <span class="token operator">*</span>err_str<span class="token punctuation">;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+
+	<span class="token function">kobject_init_internal</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	kobj<span class="token operator">-></span>ktype <span class="token operator">=</span> ktype<span class="token punctuation">;</span>
+	<span class="token keyword">return</span><span class="token punctuation">;</span>
+    <span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+<span class="token punctuation">&#125;</span>
+<span class="token function">EXPORT_SYMBOL</span><span class="token punctuation">(</span>kobject_init<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h2 id="4-2-kobject-add"><a href="#4-2-kobject-add" class="headerlink" title="4.2 kobject_add"></a>4.2 kobject_add</h2><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">int</span> <span class="token function">kobject_set_name_vargs</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>fmt<span class="token punctuation">,</span>
+				  va_list vargs<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>s<span class="token punctuation">;</span>
+
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>kobj<span class="token operator">-></span>name <span class="token operator">&amp;&amp;</span> <span class="token operator">!</span>fmt<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+
+	s <span class="token operator">=</span> <span class="token function">kvasprintf_const</span><span class="token punctuation">(</span>GFP_KERNEL<span class="token punctuation">,</span> fmt<span class="token punctuation">,</span> vargs<span class="token punctuation">)</span><span class="token punctuation">;</span>			  <span class="token comment">//为s申请内存，并将参数传递的字符串保存到s，s就是kobj的name</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>s<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token operator">-</span>ENOMEM<span class="token punctuation">;</span>
+
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token function">strchr</span><span class="token punctuation">(</span>s<span class="token punctuation">,</span> <span class="token char">'/'</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>									<span class="token comment">//name中不能有'/',如果有的话，使用'!'代替</span>
+		<span class="token keyword">char</span> <span class="token operator">*</span>t<span class="token punctuation">;</span>
+
+		t <span class="token operator">=</span> <span class="token function">kstrdup</span><span class="token punctuation">(</span>s<span class="token punctuation">,</span> GFP_KERNEL<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token function">kfree_const</span><span class="token punctuation">(</span>s<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>t<span class="token punctuation">)</span>
+			<span class="token keyword">return</span> <span class="token operator">-</span>ENOMEM<span class="token punctuation">;</span>
+		<span class="token function">strreplace</span><span class="token punctuation">(</span>t<span class="token punctuation">,</span> <span class="token char">'/'</span><span class="token punctuation">,</span> <span class="token char">'!'</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+		s <span class="token operator">=</span> t<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+	<span class="token function">kfree_const</span><span class="token punctuation">(</span>kobj<span class="token operator">-></span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	kobj<span class="token operator">-></span>name <span class="token operator">=</span> s<span class="token punctuation">;</span>
+
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token function">__printf</span><span class="token punctuation">(</span><span class="token number">3</span><span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">)</span> <span class="token keyword">int</span> <span class="token function">kobject_add_varg</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">,</span>
+					   <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent<span class="token punctuation">,</span>
+					   <span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>fmt<span class="token punctuation">,</span> va_list vargs<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">int</span> retval<span class="token punctuation">;</span>
+
+	retval <span class="token operator">=</span> <span class="token function">kobject_set_name_vargs</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> fmt<span class="token punctuation">,</span> vargs<span class="token punctuation">)</span><span class="token punctuation">;</span>						<span class="token comment">//设置kobj的name</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+	kobj<span class="token operator">-></span>parent <span class="token operator">=</span> parent<span class="token punctuation">;</span>
+	<span class="token keyword">return</span> <span class="token function">kobject_add_internal</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>									  <span class="token comment">//将kobj加入/sys</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">int</span> <span class="token function">kobject_add</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>fmt<span class="token punctuation">,</span> <span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	va_list args<span class="token punctuation">;</span>
+	<span class="token keyword">int</span> retval<span class="token punctuation">;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+	<span class="token function">va_start</span><span class="token punctuation">(</span>args<span class="token punctuation">,</span> fmt<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	retval <span class="token operator">=</span> <span class="token function">kobject_add_varg</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> parent<span class="token punctuation">,</span> fmt<span class="token punctuation">,</span> args<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">va_end</span><span class="token punctuation">(</span>args<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	<span class="token keyword">return</span> retval<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+<span class="token function">EXPORT_SYMBOL</span><span class="token punctuation">(</span>kobject_add<span class="token punctuation">)</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h3 id="4-2-1-kobject-add-internal"><a href="#4-2-1-kobject-add-internal" class="headerlink" title="4.2.1 kobject_add_internal"></a>4.2.1 kobject_add_internal</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">static</span> <span class="token keyword">int</span> <span class="token function">kobject_add_internal</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">int</span> error <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent<span class="token punctuation">;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+
+	parent <span class="token operator">=</span> <span class="token function">kobject_get</span><span class="token punctuation">(</span>kobj<span class="token operator">-></span>parent<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>kobj<span class="token operator">-></span>kset<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>										   <span class="token comment">//如果kobj指定了kset</span>
+		<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>parent<span class="token punctuation">)</span>
+			parent <span class="token operator">=</span> <span class="token function">kobject_get</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>kset<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>			<span class="token comment">//如果kobject没有指定父kobj，则kset->kobject是其父obj</span>
+		<span class="token function">kobj_kset_join</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>								  <span class="token comment">//将kobj加入kset链表</span>
+		kobj<span class="token operator">-></span>parent <span class="token operator">=</span> parent<span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+
+	error <span class="token operator">=</span> <span class="token function">create_dir</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>error<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+	<span class="token punctuation">&#125;</span> <span class="token keyword">else</span>
+		kobj<span class="token operator">-></span>state_in_sysfs <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">;</span>							<span class="token comment">//设置标志位，表示kobj已经加入到sysfs</span>
+
+	<span class="token keyword">return</span> error<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h3 id="4-2-2-create-dir"><a href="#4-2-2-create-dir" class="headerlink" title="4.2.2 create_dir"></a>4.2.2 create_dir</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">int</span> <span class="token function">sysfs_create_dir_ns</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">void</span> <span class="token operator">*</span>ns<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kernfs_node</span> <span class="token operator">*</span>parent<span class="token punctuation">,</span> <span class="token operator">*</span>kn<span class="token punctuation">;</span>
+	<span class="token class-name">kuid_t</span> uid<span class="token punctuation">;</span>
+	<span class="token class-name">kgid_t</span> gid<span class="token punctuation">;</span>
+	
+    <span class="token comment">//kobject节点在/sys下的层级关系，如果有父obj，则kobject的目录建在父obj下面，如果没有父obj，直接在/sys下建立新目录</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>kobj<span class="token operator">-></span>parent<span class="token punctuation">)</span>
+		parent <span class="token operator">=</span> kobj<span class="token operator">-></span>parent<span class="token operator">-></span>sd<span class="token punctuation">;</span>
+	<span class="token keyword">else</span>
+		parent <span class="token operator">=</span> sysfs_root_kn<span class="token punctuation">;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+
+	<span class="token function">kobject_get_ownership</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> <span class="token operator">&amp;</span>uid<span class="token punctuation">,</span> <span class="token operator">&amp;</span>gid<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+    <span class="token comment">//创建目录，名称就是kobj的name，权限755</span>
+	kn <span class="token operator">=</span> <span class="token function">kernfs_create_dir_ns</span><span class="token punctuation">(</span>parent<span class="token punctuation">,</span> <span class="token function">kobject_name</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">0755</span><span class="token punctuation">,</span> uid<span class="token punctuation">,</span> gid<span class="token punctuation">,</span> kobj<span class="token punctuation">,</span> ns<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+
+	kobj<span class="token operator">-></span>sd <span class="token operator">=</span> kn<span class="token punctuation">;</span>
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">int</span> <span class="token function">create_dir</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_type</span> <span class="token operator">*</span>ktype <span class="token operator">=</span> <span class="token function">get_ktype</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_ns_type_operations</span> <span class="token operator">*</span>ops<span class="token punctuation">;</span>
+	<span class="token keyword">int</span> error<span class="token punctuation">;</span>
+	<span class="token comment">//创建kobject的在/sys下的目录</span>
+	error <span class="token operator">=</span> <span class="token function">sysfs_create_dir_ns</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> <span class="token function">kobject_namespace</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+    <span class="token comment">/*以下暂不分析，上面的demo也没有涉及*/</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>ktype<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		error <span class="token operator">=</span> <span class="token function">sysfs_create_groups</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> ktype<span class="token operator">-></span>default_groups<span class="token punctuation">)</span><span class="token punctuation">;</span>
+        <span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token function">sysfs_get</span><span class="token punctuation">(</span>kobj<span class="token operator">-></span>sd<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	ops <span class="token operator">=</span> <span class="token function">kobj_child_ns_ops</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>ops<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">BUG_ON</span><span class="token punctuation">(</span>ops<span class="token operator">-></span>type <span class="token operator">&lt;=</span> KOBJ_NS_TYPE_NONE<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token function">BUG_ON</span><span class="token punctuation">(</span>ops<span class="token operator">-></span>type <span class="token operator">>=</span> KOBJ_NS_TYPES<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token function">BUG_ON</span><span class="token punctuation">(</span><span class="token operator">!</span><span class="token function">kobj_ns_type_registered</span><span class="token punctuation">(</span>ops<span class="token operator">-></span>type<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+		<span class="token function">sysfs_enable_ns</span><span class="token punctuation">(</span>kobj<span class="token operator">-></span>sd<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h3 id="4-2-3-kobj-kset-join"><a href="#4-2-3-kobj-kset-join" class="headerlink" title="4.2.3 kobj_kset_join"></a>4.2.3 kobj_kset_join</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">kobj_kset_join</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>					<span class="token comment">//将kobj加入到kset的链表中</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kobj<span class="token operator">-></span>kset<span class="token punctuation">)</span>
+		<span class="token keyword">return</span><span class="token punctuation">;</span>
+
+	<span class="token function">kset_get</span><span class="token punctuation">(</span>kobj<span class="token operator">-></span>kset<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">spin_lock</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>kset<span class="token operator">-></span>list_lock<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">list_add_tail</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>entry<span class="token punctuation">,</span> <span class="token operator">&amp;</span>kobj<span class="token operator">-></span>kset<span class="token operator">-></span>list<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">spin_unlock</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>kset<span class="token operator">-></span>list_lock<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h3 id="4-2-4-kobject-create-and-add"><a href="#4-2-4-kobject-create-and-add" class="headerlink" title="4.2.4 kobject_create_and_add"></a>4.2.4 kobject_create_and_add</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token comment">//没啥讲的, 动态创建kobject,      kobject_create_and_add  </span>
+<span class="token comment">//									= kobject_create + kobject_add</span>
+<span class="token comment">//									= kmalloc + kobject_init + kobject_add</span>
+
+<span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span><span class="token function">kobject_create</span><span class="token punctuation">(</span><span class="token keyword">void</span><span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">;</span>
+
+	kobj <span class="token operator">=</span> <span class="token function">kzalloc</span><span class="token punctuation">(</span><span class="token keyword">sizeof</span><span class="token punctuation">(</span><span class="token operator">*</span>kobj<span class="token punctuation">)</span><span class="token punctuation">,</span> GFP_KERNEL<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kobj<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+
+	<span class="token function">kobject_init</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> <span class="token operator">&amp;</span>dynamic_kobj_ktype<span class="token punctuation">)</span><span class="token punctuation">;</span>				<span class="token comment">//不一样的是这个地方，会为kobject指定一个默认的ktype</span>
+	<span class="token keyword">return</span> kobj<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span><span class="token function">kobject_create_and_add</span><span class="token punctuation">(</span><span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>name<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">;</span>
+	<span class="token keyword">int</span> retval<span class="token punctuation">;</span>
+
+	kobj <span class="token operator">=</span> <span class="token function">kobject_create</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kobj<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+
+	retval <span class="token operator">=</span> <span class="token function">kobject_add</span><span class="token punctuation">(</span>kobj<span class="token punctuation">,</span> parent<span class="token punctuation">,</span> <span class="token string">"%s"</span><span class="token punctuation">,</span> name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>retval<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">pr_warn</span><span class="token punctuation">(</span><span class="token string">"%s: kobject_add error: %d\n"</span><span class="token punctuation">,</span> <span class="token constant">__func__</span><span class="token punctuation">,</span> retval<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token function">kobject_put</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		kobj <span class="token operator">=</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+	<span class="token keyword">return</span> kobj<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+<span class="token function">EXPORT_SYMBOL_GPL</span><span class="token punctuation">(</span>kobject_create_and_add<span class="token punctuation">)</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h3 id="4-2-5-kobject-put"><a href="#4-2-5-kobject-put" class="headerlink" title="4.2.5 kobject_put"></a>4.2.5 kobject_put</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">kobject_cleanup</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent <span class="token operator">=</span> kobj<span class="token operator">-></span>parent<span class="token punctuation">;</span>
+	<span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kobj_type</span> <span class="token operator">*</span>t <span class="token operator">=</span> <span class="token function">get_ktype</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>name <span class="token operator">=</span> kobj<span class="token operator">-></span>name<span class="token punctuation">;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+
+	<span class="token comment">/* remove from sysfs if the caller did not do it */</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>kobj<span class="token operator">-></span>state_in_sysfs<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">__kobject_del</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+	<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>t <span class="token operator">&amp;&amp;</span> t<span class="token operator">-></span>release<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		t<span class="token operator">-></span><span class="token function">release</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>									<span class="token comment">//调用ktype中的release函数</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token comment">/* free name if we allocated it */</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>name<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">kfree_const</span><span class="token punctuation">(</span>name<span class="token punctuation">)</span><span class="token punctuation">;</span>									<span class="token comment">//释放name占用的内存</span>
+	<span class="token punctuation">&#125;</span>
+
+	<span class="token function">kobject_put</span><span class="token punctuation">(</span>parent<span class="token punctuation">)</span><span class="token punctuation">;</span>									<span class="token comment">//父obj的引用计数减1</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">static</span> <span class="token keyword">void</span> <span class="token function">kobject_release</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kref</span> <span class="token operator">*</span>kref<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj <span class="token operator">=</span> <span class="token function">container_of</span><span class="token punctuation">(</span>kref<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span><span class="token punctuation">,</span> kref<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	<span class="token function">kobject_cleanup</span><span class="token punctuation">(</span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">void</span> <span class="token function">kobject_put</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>kobj<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span><span class="token punctuation">.</span>
+		<span class="token function">kref_put</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kobj<span class="token operator">-></span>kref<span class="token punctuation">,</span> kobject_release<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+<span class="token punctuation">&#125;</span>
+<span class="token function">EXPORT_SYMBOL</span><span class="token punctuation">(</span>kobject_put<span class="token punctuation">)</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<p>小结：</p>
+<ul>
+<li><code>kobject</code>的初始化共分成两部分，一是将初始化<code>kobject</code>数据结构，二是为<code>kobject</code>在<code>/sys</code>路径下创建目录节点和属性文件<ul>
+<li><code>kref</code>引用计数会直接设置为<code>1</code>，在释放<code>kobj</code>的时候，调用<code>kobject_put</code>，在引用计数减到<code>zero</code>时，调用<code>ktype</code>的release函数</li>
+<li>如果<code>kobject</code>指定了<code>kset</code>，会将<code>kobject</code>加入<code>kset</code>链表</li>
+<li>如果<code>kobject</code>有父<code>obj</code>，则目录节点会创建在父目录下,否则直接在<code>/sys</code>路径下创建目录节点</li>
+</ul>
+</li>
+</ul>
+<h3 id="4-2-6-kset-create-and-add"><a href="#4-2-6-kset-create-and-add" class="headerlink" title="4.2.6 kset_create_and_add"></a>4.2.6 kset_create_and_add</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">static</span> <span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span><span class="token function">kset_create</span><span class="token punctuation">(</span><span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>name<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kset_uevent_ops</span> <span class="token operator">*</span>uevent_ops<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent_kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>kset<span class="token punctuation">;</span>
+	<span class="token keyword">int</span> retval<span class="token punctuation">;</span>
+
+	kset <span class="token operator">=</span> <span class="token function">kzalloc</span><span class="token punctuation">(</span><span class="token keyword">sizeof</span><span class="token punctuation">(</span><span class="token operator">*</span>kset<span class="token punctuation">)</span><span class="token punctuation">,</span> GFP_KERNEL<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kset<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+	retval <span class="token operator">=</span> <span class="token function">kobject_set_name</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>kset<span class="token operator">-></span>kobj<span class="token punctuation">,</span> <span class="token string">"%s"</span><span class="token punctuation">,</span> name<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	kset<span class="token operator">-></span>uevent_ops <span class="token operator">=</span> uevent_ops<span class="token punctuation">;</span>
+	kset<span class="token operator">-></span>kobj<span class="token punctuation">.</span>parent <span class="token operator">=</span> parent_kobj<span class="token punctuation">;</span>
+
+	kset<span class="token operator">-></span>kobj<span class="token punctuation">.</span>ktype <span class="token operator">=</span> <span class="token operator">&amp;</span>kset_ktype<span class="token punctuation">;</span>
+	kset<span class="token operator">-></span>kobj<span class="token punctuation">.</span>kset <span class="token operator">=</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+
+	<span class="token keyword">return</span> kset<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span><span class="token function">kset_create_and_add</span><span class="token punctuation">(</span><span class="token keyword">const</span> <span class="token keyword">char</span> <span class="token operator">*</span>name<span class="token punctuation">,</span> <span class="token keyword">const</span> <span class="token keyword">struct</span> <span class="token class-name">kset_uevent_ops</span> <span class="token operator">*</span>uevent_ops<span class="token punctuation">,</span> <span class="token keyword">struct</span> <span class="token class-name">kobject</span> <span class="token operator">*</span>parent_kobj<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>kset<span class="token punctuation">;</span>
+	<span class="token keyword">int</span> error<span class="token punctuation">;</span>
+
+	kset <span class="token operator">=</span> <span class="token function">kset_create</span><span class="token punctuation">(</span>name<span class="token punctuation">,</span> uevent_ops<span class="token punctuation">,</span> parent_kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token operator">!</span>kset<span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+	error <span class="token operator">=</span> <span class="token function">kset_register</span><span class="token punctuation">(</span>kset<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">if</span> <span class="token punctuation">(</span>error<span class="token punctuation">)</span> <span class="token punctuation">&#123;</span>
+		<span class="token function">kfree</span><span class="token punctuation">(</span>kset<span class="token punctuation">)</span><span class="token punctuation">;</span>
+		<span class="token keyword">return</span> <span class="token constant">NULL</span><span class="token punctuation">;</span>
+	<span class="token punctuation">&#125;</span>
+	<span class="token keyword">return</span> kset<span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+<span class="token function">EXPORT_SYMBOL_GPL</span><span class="token punctuation">(</span>kset_create_and_add<span class="token punctuation">)</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h3 id="4-2-7-kset-register"><a href="#4-2-7-kset-register" class="headerlink" title="4.2.7 kset_register"></a>4.2.7 kset_register</h3><pre class="line-numbers language-c" data-language="c"><code class="language-c"><span class="token keyword">void</span> <span class="token function">kset_init</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>k<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token function">kobject_init_internal</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>k<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">INIT_LIST_HEAD</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>k<span class="token operator">-></span>list<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token function">spin_lock_init</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>k<span class="token operator">-></span>list_lock<span class="token punctuation">)</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+
+<span class="token keyword">int</span> <span class="token function">kset_register</span><span class="token punctuation">(</span><span class="token keyword">struct</span> <span class="token class-name">kset</span> <span class="token operator">*</span>k<span class="token punctuation">)</span>
+<span class="token punctuation">&#123;</span>
+	<span class="token keyword">int</span> err<span class="token punctuation">;</span>
+
+	<span class="token function">kset_init</span><span class="token punctuation">(</span>k<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	err <span class="token operator">=</span> <span class="token function">kobject_add_internal</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>k<span class="token operator">-></span>kobj<span class="token punctuation">)</span><span class="token punctuation">;</span>
+
+	<span class="token function">kobject_uevent</span><span class="token punctuation">(</span><span class="token operator">&amp;</span>k<span class="token operator">-></span>kobj<span class="token punctuation">,</span> KOBJ_ADD<span class="token punctuation">)</span><span class="token punctuation">;</span>
+	<span class="token keyword">return</span> <span class="token number">0</span><span class="token punctuation">;</span>
+<span class="token punctuation">&#125;</span>
+<span class="token function">EXPORT_SYMBOL</span><span class="token punctuation">(</span>kset_register<span class="token punctuation">)</span><span class="token punctuation">;</span><span aria-hidden="true" class="line-numbers-rows"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span></code></pre>
+
+<h1 id="5-参考文献"><a href="#5-参考文献" class="headerlink" title="5. 参考文献"></a>5. 参考文献</h1><p><a target="_blank" rel="noopener" href="https://www.kernel.org/doc/html/latest/translations/zh_CN/core-api/kobject.html">1. 关于kobjects、ksets和ktypes的一切你没想过需要了解的东西 — The Linux Kernel documentation</a></p>
+<p><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/464481582">2. kobject &#x2F; kset &#x2F; ktype（linux kernel 中的面向对象） - 知乎 (zhihu.com)</a></p>
+<p><a target="_blank" rel="noopener" href="http://www.wowotech.net/device_model/421.html">3. 统一设备模型：kobj、kset分析 (wowotech.net)</a></p>
 
         
         <blockquote class="mdui-m-x-0 mdui-m-t-4">
     <strong>
         作者：<a href="/mizarhou.github.io/about/">Mizar.Hou</a><br>
-        链接：<a href="https://mizarhou.github.io/2023/10/29/hello-world/">https://mizarhou.github.io/2023/10/29/hello-world/</a><br>
+        链接：<a href="https://mizarhou.github.io/linux-driver-model-1">https://mizarhou.github.io/linux-driver-model-1</a><br>
         
             本文采用 <a rel="license noopener" target="_blank" href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a> 进行许可。
         
